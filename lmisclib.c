@@ -1009,13 +1009,30 @@ static const luaL_Reg misc_lib[] = {
 	{ NULL, NULL }
 };
 
+static int settablereadonly(lua_State *L)
+{
+	return luaL_error(L, "Must not update a read-only table");
+}
+
 #define LUA_MISCLIBNAME "misc"
 
 LUA_API int luaopen_misc(lua_State *L)
 {
 	check_endian();
 
+	//main table for this module
+	lua_newtable(L);
+
+	//metatable for the main table
+	lua_createtable(L, 0, 2);
+
 	luaL_register(L, LUA_MISCLIBNAME, misc_lib);
+
+	lua_setfield(L, -2, "__index");
+	lua_pushcfunction(L, settablereadonly);
+	lua_setfield(L, -2, "__newindex");
+
+	lua_setmetatable(L, -2);
 
 	return 1;
 }
