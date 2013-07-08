@@ -1,15 +1,15 @@
 /**
- * Lua extension compatible with PHP's pack/unpack functions
+ * Lua extension compatible with PHP's pack/unpack, trim and so on
  * @author microwish@gmail.com
  */
 #include <lua.h>
 #include <lauxlib.h>
 
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <limits.h>
+#include <string.h>
 
 /* Whether machine is little endian */
 char machine_little_endian;
@@ -583,6 +583,7 @@ static long do_unpack(const char *data, int size, int issigned, int *map)
 }
 
 //compromise with PHP escaped characters
+//XXX: maybe refer lobject.c:luaO_str2d?
 static int str_to_bin(const char *str, char **bin)
 {
 	if (!str || !bin || !str[0])
@@ -1003,9 +1004,140 @@ static int unpack(lua_State *L)
 	return 1;
 }
 
+static inline int setcharmask(const unsigned char *input, int len, char *mask)
+{
+	//adopted from zend.h
+#define SUCCESS 0
+#define FAILURE -1
+
+	const unsigned char *end;
+	unsigned char c;
+	int result = SUCCESS;
+
+	memset(mask, 0, 256);//256 hardcoded. EASCII?
+
+	for (end = input + len; input < end; input++) {
+		c = *input;
+		//e.g. range of a..z
+		if (input + 3 < end && input[1] == '.' && input[2] == '.' && input[3] >= c) {
+			memset(mask + c, 1, input[3] - c + 1);
+			input += 3;
+		} else if (input + 1 < end && input[0] == '.' && input[1] == '.') {
+			//to be friendly
+			if (end - len >= input//at beginning of input, so no chars to the left of ..
+					|| input + 2 >= end//no chars after the ..
+					|| input[-1] > input[2]) {//must no desc order
+				result = FAILURE;
+				continue;
+			}
+			//other possible error
+			result = FAILURE;
+			continue;
+		} else {
+			//the most common case
+			mask[c] = 1;
+		}
+	}
+
+	return result;
+}
+
+static const char *do_trim(const char *c, int *lenp, const char *what, int what_len, int mode)
+{
+	register int i;
+	int trimmed = 0, len = *lenp;
+	char mask[256];
+
+	if (what) {
+		//ignore return value
+		setcharmask((const unsigned char *)what, what_len, mask);
+	} else {
+		setcharmask((const unsigned char *)" \n\r\t\v\0", 6, mask);
+	}
+
+	//ltrim
+	if (mode & 1) {
+		for (i = 0; i < len; i++) {
+			if (mask[(unsigned char)c[i]])
+				trimmed++;
+			else
+				break;
+		}
+		len -= trimmed;
+		c += trimmed;
+	}
+	//rtrim
+	if (mode & 2) {
+		for (i = len - 1; i >= 0; i--) {
+			if (mask[(unsigned char)c[i]])
+				len--;
+			else
+				break;
+		}
+	}
+
+	*lenp = len;
+
+	return c;
+}
+
+static int wrap_trim(lua_State *L, int mode)
+{
+	const char *charlist, *str;
+	size_t listlen, len;
+	int n;
+
+	switch ((n = lua_gettop(L))) {
+		case 2:
+			if (lua_type(L, 2) != LUA_TSTRING) {
+				lua_pushboolean(L, 0);
+				lua_pushliteral(L, "arg#2 error");
+				return 2;
+			}
+			charlist = lua_tolstring(L, 2, &listlen);
+		case 1:
+			if (lua_type(L, 1) != LUA_TSTRING) {
+				lua_pushboolean(L, 0);
+				lua_pushliteral(L, "arg#1 error");
+				return 2;
+			}
+			str = lua_tolstring(L, 1, &len);
+			break;
+		default:
+			lua_pushboolean(L, 0);
+			lua_pushliteral(L, "Arguments error");
+			return 2;
+	}
+	lua_pop(L, n);
+
+	str = do_trim(str, (int *)&len, charlist, listlen, mode);
+
+	lua_pushlstring(L, str, len);
+
+	return 1;
+}
+
+static int trim(lua_State *L)
+{
+	return wrap_trim(L, 3);
+}
+
+static int ltrim(lua_State *L)
+{
+	return wrap_trim(L, 1);
+}
+
+static int rtrim(lua_State *L)
+{
+	return wrap_trim(L, 2);
+}
+
 static const luaL_Reg misc_lib[] = {
 	{ "pack", pack },
 	{ "unpack", unpack },
+	{ "trim", trim },
+	{ "ltrim", ltrim },
+	{ "rtrim", rtrim },
 	{ NULL, NULL }
 };
 
