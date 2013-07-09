@@ -1,5 +1,5 @@
 /**
- * Lua extension compatible with PHP's pack/unpack, trim and so on
+ * Lua extension compatible with PHP's pack/unpack, trim, traceback and so on
  * @author microwish@gmail.com
  */
 #include <lua.h>
@@ -1132,12 +1132,90 @@ static int rtrim(lua_State *L)
 	return wrap_trim(L, 2);
 }
 
+static lua_State *getthread(lua_State *L, int *arg)
+{
+	if (lua_isthread(L, 1)) {
+		*arg = 1;
+		return lua_tothread(L, 1);
+	} else {
+		*arg = 0;
+		return L;
+	}
+}
+
+/**
+ * debug.traceback originally in the form of string:
+stack traceback:
+	1.lua:23: in function 'p_dbg'
+	1.lua:26: in main chunk
+	[C]: ?
+
+ * @proto LUA_TTABLE traceback_retarr([LUA_TTHREAD thread,] [LUA_TNUMBER level])
+ * {
+ * 	{"file":, "line":, "function":},
+ * 	{"file":, "line":, "function":}
+ * }
+*/
+static int traceback_retarr(lua_State *L)
+{
+#define LEVELS1	12 /* size of the first part of the stack */
+#define LEVELS2	10 /* size of the second part of the stack */
+
+	int level,//stack depth level*/
+		firstpart = 1,//stack part
+		arg, i;
+	lua_State *L1 = getthread(L, &arg);//thread to inspect
+	lua_Debug ar;
+
+	if (lua_isnumber(L, arg + 1)) {
+		level = (int)lua_tointeger(L, arg + 1);
+		lua_pop(L, 1);
+	} else {
+		level = L1 == L ? 1 : 0;//level 0 stands for this own function
+	}
+
+	lua_newtable(L);
+
+	i = 1;
+	while (lua_getstack(L, level++, &ar)) {
+		if (level > LEVELS1 && firstpart) {
+			//no more than LEVELS2 levels
+			if (!lua_getstack(L, level + LEVELS2, &ar)) {
+				level--;
+			} else {
+				while (lua_getstack(L, level + LEVELS2, &ar))
+					level++;
+			}
+			firstpart = 0;
+			continue;
+		}
+
+		lua_createtable(L, 0, 3);
+
+		lua_getinfo(L, "Snl", &ar);
+
+		if (ar.currentline > 0) {
+			lua_pushstring(L, ar.short_src);
+			lua_setfield(L, -2, "file");
+			lua_pushinteger(L, ar.currentline);
+			lua_setfield(L, -2, "line");
+			lua_pushstring(L, ar.name);
+			lua_setfield(L, -2, "function");
+		}
+
+		lua_rawseti(L, -2, i++);
+	}
+
+	return 1;
+}
+
 static const luaL_Reg misc_lib[] = {
 	{ "pack", pack },
 	{ "unpack", unpack },
 	{ "trim", trim },
 	{ "ltrim", ltrim },
 	{ "rtrim", rtrim },
+	{ "traceback_retarr", traceback_retarr },
 	{ NULL, NULL }
 };
 
