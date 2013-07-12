@@ -1,5 +1,5 @@
 /**
- * Lua extension compatible with PHP's pack/unpack, trim, traceback and so on
+ * Lua extension compatible with PHP's pack/unpack, trim/ltrim/rtrim and etc. etc.
  * @author microwish@gmail.com
  */
 #include <lua.h>
@@ -101,7 +101,9 @@ static void check_endian(void)
 	if ((a) < 0 || ((INT_MAX - output_pos) / (int)(b)) < (a)) { \
 		free(fmt_codes); \
 		free(fmt_args); \
-		return luaL_error(L, "Type %c: integer overflow in format string", code); \
+		lua_pushboolean(L, 0); \
+		lua_pushfstring(L, "Type %c: integer overflow in format string", code); \
+		return 2; \
 	} \
 	output_pos += (a) * (b);
 
@@ -232,25 +234,36 @@ static int pack(lua_State *L)
 	int *fmt_args = NULL;//redundant container for repeater arg of format codes
 	int fmtcnt;
 
-	if ((num_args = lua_gettop(L)) < 2)
-		return luaL_error(L, "2 arguments required at least");
+	if ((num_args = lua_gettop(L)) < 2) {
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "2 arguments required at least");
+		return 2;
+	}
 
-	if (LUA_TSTRING != lua_type(L, 1))
-		return luaL_error(L, "arg#1 must be a string");
+	if (LUA_TSTRING != lua_type(L, 1)) {
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "arg#1 must be a string");
+		return 2;
+	}
 
 	fmtstr = lua_tolstring(L, 1, &fmtlen);
-	if (fmtlen < 1)
-		return luaL_error(L, "arg#1 empty");
+	if (fmtlen < 1) {
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "arg#1 empty");
+		return 2;
+	}
 	arg_n = 1;
 
-	//too costly?!
-	//lua_remove(L, 1);
-
-	if (!(fmt_codes = calloc(fmtlen, sizeof(char))))
-		return luaL_error(L, "Allocating buffer for format codes failed");
+	if (!(fmt_codes = calloc(fmtlen, sizeof(char)))) {
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "Allocating buffer for format codes failed");
+		return 2;
+	}
 	if (!(fmt_args = calloc(fmtlen, sizeof(int)))) {
 		free(fmt_codes);
-		return luaL_error(L, "Allocating buffer for format args failed");
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "Allocating buffer for format args failed");
+		return 2;
 	}
 
 	for (i = 0, fmtcnt = 0; i < fmtlen; fmtcnt++) {
@@ -285,7 +298,9 @@ static int pack(lua_State *L)
 				if (arg_n >= num_args) {
 					free(fmt_codes);
 					free(fmt_args);
-					return luaL_error(L, "Type %c: not enought arguments", code);
+					lua_pushboolean(L, 0);
+					lua_pushfstring(L, "Type %c: not enought arguments", code);
+					return 2;
 				}
 
 				arg_n++;
@@ -318,14 +333,18 @@ static int pack(lua_State *L)
 				if ((arg_n += arg) > num_args) {
 					free(fmt_codes);
 					free(fmt_args);
-					return luaL_error(L, "Type %c: too few arguments", code);
+					lua_pushboolean(L, 0);
+					lua_pushfstring(L, "Type %c: too few arguments", code);
+					return 2;
 				}
 				break;
 
 			default:
 				free(fmt_codes);
 				free(fmt_args);
-				return luaL_error(L, "Type %c: unknown format code", code);
+				lua_pushboolean(L, 0);
+				lua_pushfstring(L, "Type %c: unknown format code", code);
+				return 2;
 		}
 
 		fmt_codes[fmtcnt] = code;
@@ -389,7 +408,9 @@ static int pack(lua_State *L)
 	if (!output) {
 		free(fmt_codes);
 		free(fmt_args);
-		return luaL_error(L, "Allocating for output failed");
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "Allocating for output failed");
+		return 2;
 	}
 
 	output_pos = 0;
@@ -638,7 +659,9 @@ static int unpack(lua_State *L)
 	if (lua_gettop(L) != 2//strictly two
 		|| lua_type(L, 1) != LUA_TSTRING
 		|| lua_type(L, 2) != LUA_TSTRING) {
-		return luaL_error(L, "2 string arguments required");
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "2 string arguments required");
+		return 2;
 	}
 
 	const char *format/*format string*/, *input/*packed string to be unpakced*/;
@@ -669,7 +692,9 @@ static int unpack(lua_State *L)
 			free(input_bin);
 			input_bin = NULL;
 		}
-		return luaL_error(L, "Internal error");
+		lua_pushboolean(L, 0);
+		lua_pushliteral(L, "Internal error");
+		return 2;
 	}
 
 	lua_pop(L, 2);//XXX: pop or not? chances are that they are gc-ed?
@@ -760,7 +785,9 @@ static int unpack(lua_State *L)
 					free(input_bin);
 					input_bin = NULL;
 				}
-				return luaL_error(L, "Invalid format type: %c", type);
+				lua_pushboolean(L, 0);
+				lua_pushfstring(L, "Invalid format type: %c", type);
+				return 2;
 		}
 
 		//do actual unpacking
@@ -823,7 +850,9 @@ static int unpack(lua_State *L)
 								free(input_bin);
 								input_bin = NULL;
 							}
-							return luaL_error(L, "Internal error");
+							lua_pushboolean(L, 0);
+							lua_pushliteral(L, "Internal error");
+							return 2;
 						}
 
 						nibbleshift = type == 'h' ? 0 : 4;
@@ -991,7 +1020,9 @@ static int unpack(lua_State *L)
 					free(input_bin);
 					input_bin = NULL;
 				}
-				return luaL_error(L, "Type %c: not enough input, need %d, have %d", type, size, inputlen - inputpos);
+				lua_pushboolean(L, 0);
+				lua_pushfstring(L, "Type %c: not enough input, need %d, have %d", type, size, inputlen - inputpos);
+				return 2;
 			}
 		}
 
@@ -1199,7 +1230,7 @@ static int traceback_retarr(lua_State *L)
 			lua_setfield(L, -2, "file");
 			lua_pushinteger(L, ar.currentline);
 			lua_setfield(L, -2, "line");
-			lua_pushstring(L, ar.name);
+			lua_pushstring(L, ar.name ? ar.name : "?");
 			lua_setfield(L, -2, "function");
 		}
 
